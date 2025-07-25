@@ -35,13 +35,16 @@ void check_file_contents(char const * filename)
 {
     auto contents = read_file(filename);
     auto expected_contents = get_test_data();
-    auto expected_contents_span = expected_contents->span_as<char>();
 
-    REQUIRE(contents.size() == expected_contents_span.size());
-    for (std::size_t i = 0; i < expected_contents_span.size(); i += 1) {
-        CHECK(contents[i] == expected_contents_span[i]);
+    const char* expected_data = reinterpret_cast<const char*>(expected_contents->data());
+    size_t expected_size = expected_contents->size();
+
+    REQUIRE(contents.size() == expected_size);
+    for (std::size_t i = 0; i < expected_size; i += 1) {
+        CHECK(contents[i] == expected_data[i]);
     }
 }
+
 }  // namespace
 
 void run_output_stream_test(std::shared_ptr<arrow::io::OutputStream> output_stream)

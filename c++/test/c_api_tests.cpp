@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <iostream>
 #include <numeric>
+#include <fstream>
 
 struct Pod5ReadId {
     Pod5ReadId() = default;
@@ -28,7 +29,7 @@ struct Pod5ReadId {
 
 std::ostream & operator<<(std::ostream & str, Pod5ReadId rid) { return str << rid.as_uuid(); }
 
-SCENARIO("C API Reads")
+SCENARIO("C API Reads", "[mytest1]")
 {
     static constexpr char const * filename = "./foo_c_api.pod5";
 
@@ -807,7 +808,7 @@ TEST_CASE("pod5_create_file with options")
     REQUIRE_POD5_OK(pod5_close_and_free_writer(writer));
 }
 
-TEST_CASE("VBZ compression")
+TEST_CASE("VBZ compression", "[mytest2]")
 {
     pod5_init();
     auto cleanup = gsl::finally([] { pod5_terminate(); });
@@ -828,6 +829,9 @@ TEST_CASE("VBZ compression")
         input_signal.data(), input_signal.size(), compressed_signal.data(), &compressed_size));
     REQUIRE(compressed_size <= compressed_read_max_size);
     compressed_signal.resize(compressed_size);
+    std::cout << "Original size: " << input_signal.size() << std::endl;
+    std::cout << "Compressed size: " << compressed_signal.size() << std::endl;
+    std::cout << "Compression ratio: " << 1.0f * input_signal.size() / compressed_signal.size() << std::endl;
 
     // Decompress it.
     std::vector<int16_t> output_signal(sample_count);
@@ -849,4 +853,210 @@ TEST_CASE("VBZ compression")
     size_t const max_size_error = pod5_vbz_compressed_signal_max_size(std::uint64_t{1} << 48);
     CHECK(max_size_error == 0);
     CHECK_POD5_NOT_OK(pod5_get_error_no());
+}
+
+TEST_CASE("Read binary signal and save to POD5 with compression stats", "[mytest3]")
+{
+    // 1. 初始化POD5环境
+    pod5_init();
+    auto cleanup = gsl::finally([] { pod5_terminate(); });
+
+    // 2. 定义文件路径
+    // const std::string input_binary_file = "/ssdData/reads_test_dat/reads_10.dat";
+    // const std::string input_binary_file = "/ssdData/reads_test_dat/reads_20.dat";
+    // const std::string input_binary_file = "/ssdData/reads_test_dat/reads_30.dat";
+    const std::string input_binary_file = "/ssdData/reads_test_dat/reads_all.dat";
+    const std::string output_pod5_file = "./output_signal.pod5";
+
+    // 3. 从二进制文件读取信号数据
+    std::vector<int16_t> signal_data;
+    {
+        std::ifstream ifs(input_binary_file, std::ios::binary | std::ios::ate);
+        REQUIRE(ifs.is_open());
+
+        auto file_size = ifs.tellg();
+        ifs.seekg(0, std::ios::beg);
+
+        REQUIRE(file_size % sizeof(int16_t) == 0);
+        signal_data.resize(file_size / sizeof(int16_t));
+        ifs.read(reinterpret_cast<char*>(signal_data.data()), file_size);
+    }
+
+    std::cout << "Read " << signal_data.size() << " samples from binary file\n";
+
+    // 4. 创建POD5文件并写入数据
+    {
+        // 删除已存在的文件
+        REQUIRE(remove_file_if_exists(output_pod5_file).ok());
+
+        // 创建POD5文件
+        auto file = pod5_create_file(output_pod5_file.c_str(), "signal_writer", nullptr);
+        REQUIRE(file);
+        CHECK_POD5_OK(pod5_get_error_no());
+
+        // 添加pore类型
+        std::int16_t pore_type_id = -1;
+        CHECK_POD5_OK(pod5_add_pore(&pore_type_id, file, "test_pore"));
+        REQUIRE(pore_type_id == 0);
+
+        // 添加run信息
+        std::vector<char const *> context_tags_keys{"source", "test"};
+        std::vector<char const *> context_tags_values{"binary_file", "compression_test"};
+        std::vector<char const *> tracking_id_keys{"device", "operator"};
+        std::vector<char const *> tracking_id_values{"test_device", "tester"};
+
+        std::int16_t run_info_id = -1;
+        CHECK_POD5_OK(pod5_add_run_info(
+            &run_info_id,
+            file,
+            "binary_signal_acq",
+            15400,
+            4095,   // adc_max
+            -4096,  // adc_min
+            context_tags_keys.size(),
+            context_tags_keys.data(),
+            context_tags_values.data(),
+            "binary_signal_test",
+            "test_flowcell",
+            "TEST001",
+            "test_protocol",
+            "test_run_001",
+            200000,
+            "test_sample",
+            4000,
+            "test_kit",
+            "position_A1",
+            "test_position",
+            "test_software",
+            "test_system",
+            "test_type",
+            tracking_id_keys.size(),
+            tracking_id_keys.data(),
+            tracking_id_values.data()));
+        REQUIRE(run_info_id == 0);
+
+        // 准备读取数据
+        std::mt19937 gen{Catch::rngSeed()};
+        auto uuid_gen = pod5::UuidRandomGenerator{gen};
+        auto read_id = uuid_gen();
+
+        std::uint32_t read_number = 1;
+        std::uint64_t start_sample = 0;
+        float median_before = 0.0f;
+        std::uint16_t channel = 1;
+        std::uint8_t well = 1;
+        pod5_end_reason_t end_reason = POD5_END_REASON_UNKNOWN;
+        uint8_t end_reason_forced = false;
+        float calibration_offset = 0.0f;
+        float calibration_scale = 1.0f;
+        float predicted_scale = 1.0f;
+        float predicted_shift = 0.0f;
+        float tracked_scale = 1.0f;
+        float tracked_shift = 0.0f;
+        std::uint32_t num_reads_since_mux_change = 0;
+        float time_since_mux_change = 0.0f;
+        std::uint64_t num_minknow_events = 0;
+
+        ReadBatchRowInfoArrayV3 row_data{
+            (read_id_t const *)read_id.data(),
+            &read_number,
+            &start_sample,
+            &median_before,
+            &channel,
+            &well,
+            &pore_type_id,
+            &calibration_offset,
+            &calibration_scale,
+            &end_reason,
+            &end_reason_forced,
+            &run_info_id,
+            &num_minknow_events,
+            &tracked_scale,
+            &tracked_shift,
+            &predicted_scale,
+            &predicted_shift,
+            &num_reads_since_mux_change,
+            &time_since_mux_change};
+
+        // 计算压缩比
+        std::size_t original_size = signal_data.size() * sizeof(int16_t);
+        
+        // 压缩信号
+        auto compressed_max_size = pod5_vbz_compressed_signal_max_size(signal_data.size());
+        std::vector<char> compressed_signal(compressed_max_size);
+        std::size_t compressed_size = compressed_max_size;
+
+        auto start           = std::chrono::high_resolution_clock::now();
+        CHECK_POD5_OK(pod5_vbz_compress_signal(
+            signal_data.data(), signal_data.size(), compressed_signal.data(), &compressed_size));
+        auto end             = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+
+        // 打印压缩信息
+        std::cout << "\nCompression stats:\n";
+        std::cout << "Original size: " << original_size << " bytes\n";
+        std::cout << "Compressed size: " << compressed_size << " bytes\n";
+        std::cout << "Compression time: " << duration << " ms\n";
+        std::cout << "Compression ratio: " 
+                 << static_cast<float>(original_size) / compressed_size << "\n";
+        std::cout << "Space savings: " 
+                 << 100.0f * (1.0f - static_cast<float>(compressed_size) / original_size) 
+                 << "%\n";
+
+        // 写入压缩后的数据
+        char const * compressed_data[] = {compressed_signal.data()};
+        char const ** compressed_data_ptr = compressed_data;
+        std::size_t compressed_size_arr[] = {compressed_size};
+        std::size_t const * compressed_size_ptr = compressed_size_arr;
+        std::uint32_t signal_size_arr[] = {(std::uint32_t)signal_data.size()};
+        std::uint32_t const * signal_size_ptr = signal_size_arr;
+        std::size_t signal_counts = 1;
+
+        CHECK_POD5_OK(pod5_add_reads_data_pre_compressed(
+            file,
+            1,
+            READ_BATCH_ROW_INFO_VERSION_3,
+            &row_data,
+            &compressed_data_ptr,
+            &compressed_size_ptr,
+            &signal_size_ptr,
+            &signal_counts));
+
+        // 关闭文件
+        CHECK_POD5_OK(pod5_close_and_free_writer(file));
+    }
+
+    // 5. 验证写入的数据
+    {
+        auto file = pod5_open_file(output_pod5_file.c_str());
+        REQUIRE(file);
+
+        std::size_t read_count = 0;
+        CHECK_POD5_OK(pod5_get_read_count(file, &read_count));
+        REQUIRE(read_count == 1);
+
+        pod5::Uuid read_id_out;
+        CHECK_POD5_OK(pod5_get_read_ids(file, 1, (read_id_t *)read_id_out.data()));
+
+        Pod5ReadRecordBatch * batch = nullptr;
+        CHECK_POD5_OK(pod5_get_read_batch(&batch, file, 0));
+        REQUIRE(batch);
+
+        ReadBatchRowInfoV3 row_info;
+        uint16_t version;
+        CHECK_POD5_OK(pod5_get_read_batch_row_info_data(
+            batch, 0, READ_BATCH_ROW_INFO_VERSION, &row_info, &version));
+        
+        REQUIRE(row_info.num_samples == signal_data.size());
+
+        std::vector<int16_t> read_back_signal(row_info.num_samples);
+        CHECK_POD5_OK(pod5_get_read_complete_signal(
+            file, batch, 0, row_info.num_samples, read_back_signal.data()));
+
+        // 验证数据一致性
+        REQUIRE(read_back_signal == signal_data);
+
+        pod5_free_read_batch(batch);
+        pod5_close_and_free_reader(file);
+    }
 }

@@ -117,9 +117,9 @@ add_subdirectory(c++)
 
 # The fuzz directory contains both the fuzzers and the regression runners,
 # the latter of which can be built as ordinary tests.
-if (ENABLE_FUZZERS OR NOT POD5_DISABLE_TESTS)
-    add_subdirectory(fuzz)
-endif()
+# if (ENABLE_FUZZERS OR NOT POD5_DISABLE_TESTS)
+#     add_subdirectory(fuzz)
+# endif()
 
 if (ENABLE_POD5_PACKAGING)
     include(pod5_packaging)

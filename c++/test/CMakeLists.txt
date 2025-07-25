@@ -29,6 +29,7 @@ target_link_libraries(pod5_unit_tests
     PUBLIC
         pod5_format
         ${maybe_public_libs}
+        /usr/lib/x86_64-linux-gnu/libcurl.so
 )
 
 set_property(TARGET pod5_unit_tests PROPERTY CXX_STANDARD 20)
