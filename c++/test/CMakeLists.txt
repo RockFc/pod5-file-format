@@ -25,11 +25,13 @@ if (${CMAKE_CXX_COMPILER_ID} MATCHES "Clang")
     set_source_files_properties(c_api_build_test.c PROPERTIES COMPILE_OPTIONS "-Wdocumentation")
 endif()
 
+find_package(CURL REQUIRED)
+
 target_link_libraries(pod5_unit_tests
     PUBLIC
         pod5_format
         ${maybe_public_libs}
-        /usr/lib/x86_64-linux-gnu/libcurl.so
+        CURL::libcurl
 )
 
 set_property(TARGET pod5_unit_tests PROPERTY CXX_STANDARD 20)

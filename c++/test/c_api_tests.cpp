@@ -11,9 +11,18 @@
 #include <gsl/gsl-lite.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cctype>
+#include <chrono>
+#include <cmath>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <numeric>
-#include <fstream>
+#include <sstream>
+#include <vector>
 
 struct Pod5ReadId {
     Pod5ReadId() = default;
@@ -865,8 +874,8 @@ TEST_CASE("Read binary signal and save to POD5 with compression stats", "[mytest
     // const std::string input_binary_file = "/ssdData/reads_test_dat/reads_10.dat";
     // const std::string input_binary_file = "/ssdData/reads_test_dat/reads_20.dat";
     // const std::string input_binary_file = "/ssdData/reads_test_dat/reads_30.dat";
-    const std::string input_binary_file = "/ssdData/reads_test_dat/reads_all.dat";
-    const std::string output_pod5_file = "./output_signal.pod5";
+    const std::string input_binary_file = "../../../test_data/int16_export/FAY22732_pass_barcode81_6af3f71b_1accfdb0_0.dat";
+    const std::string output_pod5_file = "../../../test_data/int16_export/FAY22732_pass_barcode81_6af3f71b_1accfdb0_0.pod5";
 
     // 3. 从二进制文件读取信号数据
     std::vector<int16_t> signal_data;
@@ -1058,5 +1067,316 @@ TEST_CASE("Read binary signal and save to POD5 with compression stats", "[mytest
 
         pod5_free_read_batch(batch);
         pod5_close_and_free_reader(file);
+    }
+}
+
+namespace {
+
+bool is_pod5_file(std::filesystem::path const & path)
+{
+    auto ext = path.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return ext == ".pod5";
+}
+
+std::vector<std::filesystem::path> collect_pod5_inputs(std::filesystem::path const & input)
+{
+    REQUIRE(std::filesystem::exists(input));
+    std::vector<std::filesystem::path> files;
+    if (std::filesystem::is_directory(input)) {
+        for (auto const & entry : std::filesystem::directory_iterator(input)) {
+            if (entry.is_regular_file() && is_pod5_file(entry.path())) {
+                files.push_back(entry.path());
+            }
+        }
+        std::sort(files.begin(), files.end());
+    } else {
+        files.push_back(input);
+    }
+    REQUIRE_FALSE(files.empty());
+    return files;
+}
+
+struct Int16ExportSummary {
+    std::string input_pod5;
+    std::string output_dat;
+    std::uint64_t pod5_bytes = 0;
+    std::uint64_t int16_bytes = 0;
+    std::size_t total_reads = 0;
+    std::size_t exported = 0;
+    double compression_ratio = 0.0;
+    double space_savings = 0.0;
+    bool full_export = false;
+};
+
+Int16ExportSummary export_one_pod5_to_int16(
+    std::filesystem::path const & input_path,
+    std::filesystem::path const & output_root,
+    std::size_t max_reads,
+    std::string const & sizes_filename,
+    std::string const & stats_filename)
+{
+    Int16ExportSummary summary;
+    summary.input_pod5 = input_path.string();
+
+    auto reader = pod5_open_file(summary.input_pod5.c_str());
+    REQUIRE(reader);
+    REQUIRE_POD5_OK(pod5_get_error_no());
+
+    std::size_t total_reads = 0;
+    REQUIRE_POD5_OK(pod5_get_read_count(reader, &total_reads));
+    REQUIRE(total_reads > 0);
+    summary.total_reads = total_reads;
+
+    std::size_t const export_limit =
+        (max_reads == 0) ? total_reads : std::min(total_reads, max_reads);
+
+    std::filesystem::create_directories(output_root);
+    auto const output_dat =
+        (output_root / input_path.stem()).string() + ".dat";
+    summary.output_dat = output_dat;
+    REQUIRE(remove_file_if_exists(output_dat).ok());
+
+    std::ofstream dat_out(output_dat, std::ios::binary);
+    REQUIRE(dat_out.is_open());
+
+    auto const sizes_path = (output_root / sizes_filename).string();
+    std::ofstream sizes_tsv(sizes_path);
+    REQUIRE(sizes_tsv.is_open());
+    sizes_tsv << "index\tread_id\tsamples\tuncompressed_bytes\n";
+
+    std::vector<std::uint64_t> size_bytes;
+    size_bytes.reserve(export_limit);
+
+    std::size_t batch_count = 0;
+    REQUIRE_POD5_OK(pod5_get_read_batch_count(&batch_count, reader));
+
+    std::size_t exported = 0;
+    auto const t0 = std::chrono::high_resolution_clock::now();
+
+    for (std::size_t batch_idx = 0; batch_idx < batch_count && exported < export_limit;
+         ++batch_idx)
+    {
+        Pod5ReadRecordBatch * batch = nullptr;
+        REQUIRE_POD5_OK(pod5_get_read_batch(&batch, reader, batch_idx));
+        REQUIRE(batch);
+
+        std::size_t row_count = 0;
+        REQUIRE_POD5_OK(pod5_get_read_batch_row_count(&row_count, batch));
+
+        for (std::size_t row = 0; row < row_count && exported < export_limit; ++row, ++exported) {
+            ReadBatchRowInfoV3 row_info{};
+            uint16_t version = 0;
+            REQUIRE_POD5_OK(pod5_get_read_batch_row_info_data(
+                batch, row, READ_BATCH_ROW_INFO_VERSION, &row_info, &version));
+
+            std::size_t sample_count = 0;
+            REQUIRE_POD5_OK(
+                pod5_get_read_complete_sample_count(reader, batch, row, &sample_count));
+            REQUIRE(sample_count == row_info.num_samples);
+
+            std::vector<int16_t> signal(sample_count);
+            if (sample_count > 0) {
+                REQUIRE_POD5_OK(pod5_get_read_complete_signal(
+                    reader, batch, row, sample_count, signal.data()));
+            }
+
+            std::uint64_t const bytes = sample_count * sizeof(int16_t);
+            size_bytes.push_back(bytes);
+            if (bytes > 0) {
+                dat_out.write(
+                    reinterpret_cast<char const *>(signal.data()),
+                    static_cast<std::streamsize>(bytes));
+            }
+            REQUIRE(dat_out.good());
+
+            std::string read_id(36, '\0');
+            REQUIRE_POD5_OK(pod5_format_read_id(row_info.read_id, read_id.data()));
+            read_id.resize(36);
+            sizes_tsv << exported << '\t' << read_id << '\t' << sample_count << '\t' << bytes
+                      << '\n';
+        }
+
+        pod5_free_read_batch(batch);
+    }
+
+    dat_out.flush();
+    sizes_tsv.flush();
+    REQUIRE_POD5_OK(pod5_close_and_free_reader(reader));
+    REQUIRE(exported == export_limit);
+    REQUIRE(!size_bytes.empty());
+    summary.exported = exported;
+
+    auto sorted = size_bytes;
+    std::sort(sorted.begin(), sorted.end());
+    auto const n = sorted.size();
+    auto const min_b = sorted.front();
+    auto const max_b = sorted.back();
+    double const sum = std::accumulate(sorted.begin(), sorted.end(), 0.0);
+    double const mean = sum / static_cast<double>(n);
+    double acc = 0.0;
+    for (auto b : sorted) {
+        double const d = static_cast<double>(b) - mean;
+        acc += d * d;
+    }
+    double const stddev = std::sqrt(acc / static_cast<double>(n));
+    auto percentile = [&](double p) -> std::uint64_t {
+        auto idx = static_cast<std::size_t>(std::round(p * static_cast<double>(n - 1)));
+        return sorted[std::min(idx, n - 1)];
+    };
+    double const cv = (mean > 0.0) ? (stddev / mean) : 0.0;
+    double const rel_range = (mean > 0.0) ? ((max_b - min_b) / mean) : 0.0;
+
+    auto const t1 = std::chrono::high_resolution_clock::now();
+    auto const ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+    auto const in_sz = std::filesystem::file_size(input_path);
+    auto const out_sz = std::filesystem::file_size(output_dat);
+    bool const full_export = (exported == total_reads);
+    double const compression_ratio =
+        (in_sz > 0) ? (static_cast<double>(out_sz) / static_cast<double>(in_sz)) : 0.0;
+    double const space_savings = (out_sz > 0)
+        ? (100.0 * (1.0 - static_cast<double>(in_sz) / static_cast<double>(out_sz)))
+        : 0.0;
+
+    summary.pod5_bytes = in_sz;
+    summary.int16_bytes = out_sz;
+    summary.compression_ratio = compression_ratio;
+    summary.space_savings = space_savings;
+    summary.full_export = full_export;
+
+    std::cout << std::fixed << std::setprecision(3);
+    std::cout << "\n[mytest4] Export POD5 -> same-named int16 .dat\n";
+    std::cout << "Input:  " << summary.input_pod5 << "  (" << in_sz << " bytes)\n";
+    std::cout << "Output: " << output_dat << "  (" << out_sz << " bytes)\n";
+    std::cout << "Reads in file / exported: " << total_reads << " / " << exported << "\n";
+    std::cout << "Elapsed: " << ms << " ms\n";
+    std::cout << "Compression ratio (int16/POD5): " << compression_ratio;
+    if (full_export) {
+        std::cout << "  (original int16 / pod5)\n";
+        std::cout << "Space savings: " << space_savings << " %\n";
+    } else {
+        std::cout << "  (exported int16 only; not comparable to full POD5)\n";
+    }
+    std::cout << "\nPer-read uncompressed int16 size stats (bytes):\n";
+    std::cout << "  min    = " << min_b << "  (" << (min_b / 2) << " samples)\n";
+    std::cout << "  p50    = " << percentile(0.50) << "\n";
+    std::cout << "  p90    = " << percentile(0.90) << "\n";
+    std::cout << "  p99    = " << percentile(0.99) << "\n";
+    std::cout << "  max    = " << max_b << "  (" << (max_b / 2) << " samples)\n";
+    std::cout << "  mean   = " << mean << "\n";
+    std::cout << "  stddev = " << stddev << "\n";
+    std::cout << "  CV (stddev/mean)     = " << cv << "   (越小越接近)\n";
+    std::cout << "  (max-min)/mean       = " << rel_range << "\n";
+    std::cout << "  total uncompressed   = " << sum << " bytes\n";
+
+    auto const stats_path = (output_root / stats_filename).string();
+    std::ofstream stats_txt(stats_path);
+    REQUIRE(stats_txt.is_open());
+    stats_txt << std::fixed << std::setprecision(6);
+    stats_txt << "n=" << n << "\nmin=" << min_b << "\nmax=" << max_b << "\nmean=" << mean
+              << "\nstddev=" << stddev << "\ncv=" << cv << "\nrel_range=" << rel_range
+              << "\np50=" << percentile(0.50) << "\np90=" << percentile(0.90)
+              << "\np99=" << percentile(0.99) << "\ninput_pod5_bytes=" << in_sz
+              << "\noutput_dat_bytes=" << out_sz
+              << "\ncompression_ratio_int16_over_pod5=" << compression_ratio
+              << "\nspace_savings_percent=" << space_savings
+              << "\nfull_export=" << (full_export ? 1 : 0) << "\n";
+
+    std::cout << "\nSize similarity: CV=" << cv << ", rel_range=" << rel_range
+              << ((cv < 0.10 && rel_range < 0.50) ? "  -> similar\n" : "  -> not similar\n");
+
+    return summary;
+}
+
+}  // namespace
+
+TEST_CASE("Export POD5 reads to a same-named int16 .dat", "[mytest4]")
+{
+    // 从已有 POD5 解出原始 int16，写成与源文件同名的 .dat（只改后缀）。
+    // input 可以是单个 .pod5，也可以是含多个 .pod5 的文件夹（只扫描一层，不递归）。
+    pod5_init();
+    auto cleanup = gsl::finally([] { pod5_terminate(); });
+
+    const std::string input_pod5 =
+        "../../../test_data/AMtb_1__202402/FAY22732_pass_barcode81_6af3f71b_1accfdb0_0.pod5";
+    // const std::string input_pod5 = "../../../test_data/AMtb_1__202402";
+    // const std::string input_pod5 = "../../../test_data/Klebsiella_pneumoniae_KPC2";
+    const std::string output_root_base = "../../../test_data/int16_export";
+    // 0 表示导出全部；大文件可先改成例如 10000 做抽样
+    constexpr std::size_t max_reads = 0;
+
+    auto const input_path = std::filesystem::path(input_pod5);
+    bool const input_is_dir = std::filesystem::is_directory(input_path);
+    auto dir_name = input_path.filename().string();
+    if (input_is_dir && dir_name.empty()) {
+        dir_name = input_path.parent_path().filename().string();
+    }
+    // 单文件：int16_export；文件夹：int16_export_<输入文件夹名>
+    auto const output_root = input_is_dir
+        ? (std::filesystem::path(output_root_base).parent_path() / ("int16_export_" + dir_name))
+              .string()
+        : output_root_base;
+    auto const files = collect_pod5_inputs(input_path);
+
+    std::vector<Int16ExportSummary> summaries;
+    summaries.reserve(files.size());
+    for (auto const & file : files) {
+        auto const stem = file.stem().string();
+        auto const sizes_name =
+            input_is_dir ? (stem + ".sizes.tsv") : std::string("sizes.tsv");
+        auto const stats_name =
+            input_is_dir ? (stem + ".stats.txt") : std::string("size_stats.txt");
+        summaries.push_back(export_one_pod5_to_int16(
+            file, output_root, max_reads, sizes_name, stats_name));
+    }
+
+    if (!input_is_dir) {
+        return;
+    }
+
+    std::uint64_t total_pod5 = 0;
+    std::uint64_t total_int16 = 0;
+    std::size_t total_reads = 0;
+    std::size_t total_exported = 0;
+    bool all_full = true;
+    auto const summary_path =
+        (std::filesystem::path(output_root) / "summary.tsv").string();
+    std::ofstream summary_tsv(summary_path);
+    REQUIRE(summary_tsv.is_open());
+    summary_tsv << "file\tpod5_bytes\tint16_bytes\ttotal_reads\texported\tratio\tspace_savings\tfull_export\n";
+
+    std::cout << "\n[mytest4] Folder summary (" << summaries.size() << " pod5 files)\n";
+    std::cout << std::fixed << std::setprecision(3);
+    for (auto const & s : summaries) {
+        total_pod5 += s.pod5_bytes;
+        total_int16 += s.int16_bytes;
+        total_reads += s.total_reads;
+        total_exported += s.exported;
+        all_full = all_full && s.full_export;
+        auto const name = std::filesystem::path(s.input_pod5).filename().string();
+        summary_tsv << name << '\t' << s.pod5_bytes << '\t' << s.int16_bytes << '\t'
+                    << s.total_reads << '\t' << s.exported << '\t' << s.compression_ratio
+                    << '\t' << s.space_savings << '\t' << (s.full_export ? 1 : 0) << '\n';
+        std::cout << "  " << name << "  ratio=" << s.compression_ratio
+                  << "  pod5=" << s.pod5_bytes << "  int16=" << s.int16_bytes << "\n";
+    }
+
+    double const folder_ratio = (total_pod5 > 0)
+        ? (static_cast<double>(total_int16) / static_cast<double>(total_pod5))
+        : 0.0;
+    double const folder_savings = (total_int16 > 0)
+        ? (100.0 * (1.0 - static_cast<double>(total_pod5) / static_cast<double>(total_int16)))
+        : 0.0;
+    std::cout << "Reads in folder / exported: " << total_reads << " / " << total_exported << "\n";
+    std::cout << "Total POD5:  " << total_pod5 << " bytes\n";
+    std::cout << "Total int16: " << total_int16 << " bytes\n";
+    std::cout << "Compression ratio (int16/POD5): " << folder_ratio;
+    if (all_full) {
+        std::cout << "  (original int16 / pod5)\n";
+        std::cout << "Space savings: " << folder_savings << " %\n";
+    } else {
+        std::cout << "  (exported int16 only; not comparable to full POD5)\n";
     }
 }
