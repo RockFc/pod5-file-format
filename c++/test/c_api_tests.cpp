@@ -1299,10 +1299,10 @@ TEST_CASE("Export POD5 reads to a same-named int16 .dat", "[mytest4]")
     pod5_init();
     auto cleanup = gsl::finally([] { pod5_terminate(); });
 
-    const std::string input_pod5 =
-        "../../../test_data/AMtb_1__202402/FAY22732_pass_barcode81_6af3f71b_1accfdb0_0.pod5";
+    // const std::string input_pod5 =
+    //     "../../../test_data/AMtb_1__202402/FAY22732_pass_barcode81_6af3f71b_1accfdb0_0.pod5";
     // const std::string input_pod5 = "../../../test_data/AMtb_1__202402";
-    // const std::string input_pod5 = "../../../test_data/Klebsiella_pneumoniae_KPC2";
+    const std::string input_pod5 = "../../../test_data/Klebsiella_pneumoniae_KPC2";
     const std::string output_root_base = "../../../test_data/int16_export";
     // 0 表示导出全部；大文件可先改成例如 10000 做抽样
     constexpr std::size_t max_reads = 0;
