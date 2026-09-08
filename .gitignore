@@ -18,3 +18,4 @@ test_package/CMakeUserPresets.json
 __pycache__
 python/Python.framework/
 /fuzz/corpus_*
+test_data/
