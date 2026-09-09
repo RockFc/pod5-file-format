@@ -1342,7 +1342,8 @@ TEST_CASE("Read binary signal and save to POD5 with compression stats", "[mytest
     // const std::string input_dat = "../../../test_data/int16_export_AMtb_1__202402";
     const std::string input_dat =
         "/home/fuchao/workspace/code/cytools/test_data/int16_export_260F401529011_signals";
-    const std::string output_root_base = "../../../test_data/pod5_from_dat";
+    // Large outputs go under /tmp to avoid filling the repo disk
+    const std::string output_root_base = "/tmp/pod5_from_dat";
     // 大批量文件夹可改成 false，跳过读回校验以省时间
     constexpr bool verify_roundtrip = true;
 
@@ -1424,7 +1425,8 @@ TEST_CASE("Export POD5 reads to a same-named int16 .dat", "[mytest4]")
     //     "../../../test_data/AMtb_1__202402/FAY22732_pass_barcode81_6af3f71b_1accfdb0_0.pod5";
     // const std::string input_pod5 = "../../../test_data/AMtb_1__202402";
     const std::string input_pod5 = "../../../test_data/Klebsiella_pneumoniae_KPC2";
-    const std::string output_root_base = "../../../test_data/int16_export";
+    // Large outputs go under /tmp to avoid filling the repo disk
+    const std::string output_root_base = "/tmp/int16_export";
     // 0 表示导出全部；大文件可先改成例如 10000 做抽样
     constexpr std::size_t max_reads = 0;
 

@@ -3,9 +3,9 @@
 - 日期：2026-09-08
 - 用例：`c++/test/c_api_tests.cpp`，tag `[mytest4]`
 - 输入：`test_data/AMtb_1__202402/`（47 个 `.pod5`，单 flow cell `FAY22732`，barcode81）
-- 输出：`test_data/int16_export_AMtb_1__202402/`
+- 输出：`/tmp/int16_export_AMtb_1__202402/`（大体积不再写仓库 `test_data/`）
 - 结果：`All tests passed (1119120 assertions in 1 test case)`，墙钟 **58.6 s**
-- 原始表：`test_data/int16_export_AMtb_1__202402/summary.tsv`
+- 原始表：`/tmp/int16_export_AMtb_1__202402/summary.tsv`（本文数字来自 2026-09-08 跑次）
 
 ## 1. 做什么
 
@@ -25,7 +25,7 @@ cd build/c++/test
 ./pod5_unit_tests "[mytest4]"
 ```
 
-输入路径在用例里为 `../../../test_data/AMtb_1__202402`。文件夹输出目录为 `int16_export_` + 输入文件夹名。
+输入路径在用例里为 `../../../test_data/AMtb_1__202402`。文件夹输出目录为 `/tmp/int16_export_` + 输入文件夹名。
 
 ## 2. 总体结果
 
@@ -111,7 +111,7 @@ cd build/c++/test
 
 ## 5. 输出文件
 
-目录 `test_data/int16_export_AMtb_1__202402/`：
+目录 `/tmp/int16_export_AMtb_1__202402/`：
 
 | 文件 | 含义 |
 |------|------|

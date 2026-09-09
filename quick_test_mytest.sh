@@ -46,8 +46,8 @@ if [[ ! -x "$bin" ]]; then
   exit 1
 fi
 
-# 在二进制所在目录运行，使 mytest3/mytest4 里 ../../../test_data 相对路径正确
-# （与 docs 约定一致：cd build/c++/test && ./pod5_unit_tests ...）
+# 在二进制所在目录运行，使 mytest4 输入等 ../../../test_data 相对路径正确
+# （输出已改到 /tmp：mytest3 → /tmp/pod5_from_dat*，mytest4 → /tmp/int16_export*）
 bin_dir=$(dirname "$bin")
 echo "[2/2] run (cwd=$bin_dir) ./$(basename "$bin") \"$filter\" $*"
 if [[ -n "$deps_lib" ]]; then

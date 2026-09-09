@@ -103,8 +103,8 @@ ratio = 原始 int16 字节数 / .pod5 文件字节数
 
 这是整文件对比（VBZ 信号 + Reads/Run Info + 容器开销），不是「VBZ blob vs 2N」的纯算法比。全部文件都是 `full_export=1`（没有抽样）。原始汇总：
 
-- `test_data/int16_export_AMtb_1__202402/summary.tsv`
-- `test_data/int16_export_Klebsiella_pneumoniae_KPC2/summary.tsv`
+- `/tmp/int16_export_AMtb_1__202402/summary.tsv`
+- `/tmp/int16_export_Klebsiella_pneumoniae_KPC2/summary.tsv`
 
 体积按 \(10^9\) 字节记为 GB。平均 read 时长按 **5000 Hz**、每点 2 字节反推：\(T_{\text{avg}} = (\text{int16 字节}/2) / \text{reads} / 5000\)。
 
@@ -195,14 +195,14 @@ ratio = 原始 int16 字节数 / .pod5 文件字节数
 
 **和本仓库实测数据对得上，但切分规则要看 reads 数，不能只看文件个数。**
 
-`test_data/AMtb_1__202402`（`[mytest4]` 汇总见 `test_data/int16_export_AMtb_1__202402/summary.tsv`）：
+`test_data/AMtb_1__202402`（`[mytest4]` 汇总见 `/tmp/int16_export_AMtb_1__202402/summary.tsv`）：
 
 - 单 flow cell `FAY22732`，barcode81，文件名 `..._1accfdb0_{batch_number}.pod5`，`batch_number` 为 **0～46**，共 **47** 个文件。
 - 除最后一份 2332 条外，**每份正好 4000 条 read**。\(46 \times 4000 + 2332 = 186\,332\)，与解出来的 read 总数一致。
 - `.pod5` 体积 140～179 MB（末份不满批，**87 MB**），平均约 **157 MB**。体积齐，是因为每份 read 数齐、平均时长也齐（约 9.3 s），不是证明「按小时切」。
 - 若只按默认 `batch_duration=1h`、一次很长的 Run，文件个数也可能落在几十这个量级，**单看文件个数会误判**。这份数据的硬证据是每文件 4000 条，更符合 **按 read 数分批**（和旧 FAST5 常见的 4000 条/文件同类）。
 
-`test_data/Klebsiella_pneumoniae_KPC2`（汇总见 `test_data/int16_export_Klebsiella_pneumoniae_KPC2/summary.tsv`）是 **4 个 barcode/run 混在一个目录**，不是单次 Run 的 47 个小时切片：
+`test_data/Klebsiella_pneumoniae_KPC2`（汇总见 `/tmp/int16_export_Klebsiella_pneumoniae_KPC2/summary.tsv`）是 **4 个 barcode/run 混在一个目录**，不是单次 Run 的 47 个小时切片：
 
 | 文件名前缀（flow cell / barcode / run） | 文件数 | 满批 reads | 末批 reads |
 |----------------------------------------|--------|------------|------------|
@@ -575,8 +575,8 @@ Reads 表里 pore_type、end_reason、run_info 用 **Arrow dictionary**，重复
 |-----|----------|
 | `[mytest1]` `SCENARIO("C API Reads")` | 建文件 → 写 pore/run_info → 第一条 read 用 `pod5_add_reads_data`（库内压缩）→ 第二条用 VBZ 预压缩 + `pod5_add_reads_data_pre_compressed` → 读回校验 |
 | `[mytest2]` `TEST_CASE("VBZ compression")` | 不落盘，纯内存压/解 20 个 int16，并测错误缓冲区、超大 sample 数 |
-| `[mytest3]` | 读 `./test_data/reads_all.dat`（裸 `int16` 二进制）→ 预压缩 → 写入 `./test_data/output_signal.pod5` → 打印压缩比 → 再读回比对 |
-| `[mytest4]` | 输入单个 `.pod5` 或文件夹 → 解出全部 read 的裸 `int16` 写成同名 `.dat` → 打印整文件比（int16 / pod5）。文件夹输出到 `test_data/int16_export_<目录名>/`，并写 `summary.tsv` |
+| `[mytest3]` | 读裸 `int16` `.dat`（单文件或目录）→ 预压缩 VBZ 写入同名 `.pod5` → 打印压缩比。文件夹输出到 `/tmp/pod5_from_dat_<目录名>/`，并写 `summary.tsv` |
+| `[mytest4]` | 输入单个 `.pod5` 或文件夹 → 解出全部 read 的裸 `int16` 写成同名 `.dat` → 打印整文件比（int16 / pod5）。文件夹输出到 `/tmp/int16_export_<目录名>/`，并写 `summary.tsv` |
 
 跑法：
 
