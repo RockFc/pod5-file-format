@@ -16,6 +16,8 @@
 
 测试日期：`260F401529011` 于 2026-09-08；`260F700336017` 于 2026-09-09（CCF5 导出 10:26，POD5 `[mytest3]` 同日）。合计 reads **422 184**；samples **15 869 547 902**。
 
+**追加（2026-09-10）：** 自有批次 `260F300896011`（1 文件，裸 int16 **1.520 GB**）仍落在约 **1.52～1.58×**；详见 §5.5。
+
 ---
 
 ## 1. 要回答什么问题
@@ -166,6 +168,35 @@ cd pod5-file-format && ./quick_test_mytest.sh "[mytest3]"
 | POD5 输出目录（实验 2） | `/tmp/pod5_from_dat_int16_export_260F401529011_signals/` | `/tmp/pod5_from_dat_int16_export_260F700336017_signals/` |
 | POD5 summary | `.../summary.tsv` | `/tmp/pod5_from_dat_int16_export_260F700336017_signals/summary.tsv` |
 
+### 5.5 追加：`260F300896011`
+
+测试日期：2026-09-10。实验 1：`cytools/test_data/260F300896011_signals/260F300896011_0_1_0.ccf5` → 导出 `int16_export_260F300896011_signals/`（`ccf5_extract_summary.md`，16:36）；实验 2：同批 `.dat` → `/tmp/pod5_from_dat_int16_export_260F300896011_signals/`（`[mytest3]`）。1 文件，**6 057** reads；平均约 **1.25×10⁵** samples/read（≈ 31.4 s @ 4000 Hz / ≈ 25.1 s @ 5000 Hz）。
+
+合计：int16 **1.520 GB**，CCF5 **1.519×**（省 **34.2%**），POD5 **1.579×**（省 **36.7%**）。本批 CCF5 比 POD5 大约大 **3.95%**。
+
+| 口径 | 体积 | 压缩倍数 | 体积节省 |
+|------|-----:|---------:|---------:|
+| 裸 int16 | **1.520 GB** | — | — |
+| CCF5（源 `.ccf5`） | **1.001 GB** | **1.519×** | **34.2%** |
+| ONT POD5（同批 `.dat` 写入） | **0.963 GB** | **1.579×** | **36.7%** |
+
+逐文件（体积 MB 为 \(10^6\) 字节）：
+
+| 文件 | reads | int16 MB | CCF5 MB | CCF5 倍数 | POD5 MB | POD5 倍数 |
+|------|------:|---------:|--------:|----------:|--------:|----------:|
+| `260F300896011_0_1_0` | 6057 | 1520.11 | 1000.65 | 1.519 | 962.66 | 1.579 |
+| **合计** | **6 057** | **1520.11** | **1000.65** | **1.519** | **962.66** | **1.579** |
+
+与 §5.2 / §5.3 对照：绝对水平仍落在约 **1.5×** 一带，与前两批自有数据同一窄带；两种格式差距约 **4%**，仍是 POD5 略小。
+
+路径：
+
+| 项 | 路径 |
+|----|------|
+| CCF5 源 | `/home/fuchao/workspace/code/cytools/test_data/260F300896011_signals/` |
+| int16 导出 / CCF5 summary | `/home/fuchao/workspace/code/cytools/test_data/int16_export_260F300896011_signals/`（`ccf5_extract_summary.md`） |
+| POD5 输出 / summary | `/tmp/pod5_from_dat_int16_export_260F300896011_signals/`（`summary.tsv`） |
+
 ---
 
 ## 6. 变更记录
@@ -178,3 +209,4 @@ cd pod5-file-format && ./quick_test_mytest.sh "[mytest3]"
 | 2026-09-09 | 对外汇报口径：去掉「本仓库 / 本项目」等指称，POD5 侧统一写明 `pod5-file-format` |
 | 2026-09-09 | `[mytest3]` 输出改到 `/tmp/pod5_from_dat*`（不再写 `test_data/`） |
 | 2026-09-09 | 新增批次 `260F700336017`（8 文件）：CCF5 **1.458×**、POD5 **1.552×**，CCF5 大约大 **6.44%**；两批合计 CCF5 **1.467×**、POD5 **1.548×** |
+| 2026-09-10 | 追加批次 `260F300896011`（1 文件）：CCF5 **1.519×**、POD5 **1.579×**，CCF5 大约大 **3.95%**；见 §5.5 |
